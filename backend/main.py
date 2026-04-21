@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from database import init_db
-from routers import auth, diary, gallery, anniversary, config
+from routers import auth, diary, gallery, anniversary, config, counter
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 
@@ -39,6 +39,7 @@ app.include_router(diary.router)
 app.include_router(gallery.router)
 app.include_router(anniversary.router)
 app.include_router(config.router)
+app.include_router(counter.router)
 
 # 静态文件（上传的图片）
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

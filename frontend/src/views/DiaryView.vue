@@ -12,6 +12,7 @@ const total = ref(0)
 const page = ref(1)
 const limit = 20
 const loadingList = ref(false)
+const order = ref('desc') // 'desc' 最新在前，'asc' 最早在前
 
 // 当前阅读到第几篇（0-based）
 const current = ref(0)
@@ -86,10 +87,20 @@ function formatDate(dt) {
 
 async function loadDiaries() {
   loadingList.value = true
-  const { data } = await api.get(`/diaries?page=${page.value}&limit=${limit}`)
+  const { data } = await api.get(`/diaries?page=${page.value}&limit=${limit}&order=${order.value}`)
   diaries.value = data.items
   total.value = data.total
   loadingList.value = false
+}
+
+async function toggleOrder() {
+  order.value = order.value === 'desc' ? 'asc' : 'desc'
+  page.value = 1
+  current.value = 0
+  await loadDiaries()
+  // 回到第一篇
+  const container = document.querySelector('.diary-scroll')
+  container?.scrollTo({ top: 0, behavior: 'instant' })
 }
 
 onMounted(() => {
@@ -204,7 +215,7 @@ function imgGridClass(n) {
 async function loadMore() {
   page.value++
   loadingList.value = true
-  const { data } = await api.get(`/diaries?page=${page.value}&limit=${limit}`)
+  const { data } = await api.get(`/diaries?page=${page.value}&limit=${limit}&order=${order.value}`)
   diaries.value.push(...data.items)
   total.value = data.total
   loadingList.value = false
@@ -263,6 +274,9 @@ async function loadMore() {
         </div>
 
         <button class="btn btn-primary write-btn" @click="openCreate">✏️ 写日记</button>
+        <button class="order-btn" @click="toggleOrder" :title="order === 'desc' ? '当前：最新在前' : '当前：最早在前'">
+          {{ order === 'desc' ? '↓ 最新' : '↑ 最早' }}
+        </button>
       </aside>
 
       <!-- 主内容：全屏分页滚动 -->
@@ -523,6 +537,18 @@ async function loadMore() {
   font-size: 13px;
   padding: 9px 12px;
 }
+.order-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: none;
+  border: 1.5px solid #f0d0df;
+  transition: all 0.15s;
+  margin-top: 6px;
+}
+.order-btn:hover { background: var(--pink-light); color: var(--pink-dark); border-color: var(--pink); }
 
 /* ── 分页滚动容器 ───────────────────────────────── */
 .diary-scroll {

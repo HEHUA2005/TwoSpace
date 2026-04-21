@@ -6,7 +6,7 @@ const routes = [
   { path: '/',      component: () => import('../views/HomeView.vue') },
   { path: '/diary', component: () => import('../views/DiaryView.vue') },
   { path: '/gallery', component: () => import('../views/GalleryView.vue') },
-  { path: '/anniversary', component: () => import('../views/AnniversaryView.vue') },
+  { path: '/stats', component: () => import('../views/StatsView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 

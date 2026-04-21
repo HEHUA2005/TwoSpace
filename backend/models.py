@@ -36,3 +36,13 @@ class Anniversary(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     is_yearly: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Counter(Base):
+    __tablename__ = "counters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    emoji: Mapped[str] = mapped_column(String(10), nullable=False, default="✨")
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -49,6 +49,7 @@ def _diary_to_out(diary: Diary) -> DiaryOut:
 async def list_diaries(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
@@ -56,11 +57,11 @@ async def list_diaries(
     total_result = await db.execute(select(func.count()).select_from(Diary))
     total = total_result.scalar_one()
 
+    sort_col = Diary.created_at.asc() if order == "asc" else Diary.created_at.desc()
     result = await db.execute(
-        select(Diary).order_by(Diary.created_at.desc()).offset(offset).limit(limit)
+        select(Diary).order_by(sort_col).offset(offset).limit(limit)
     )
     diaries = result.scalars().unique().all()
-    # 预加载 images（已通过 relationship lazy=select，此处触发）
     for d in diaries:
         await db.refresh(d, ["images"])
 

@@ -20,7 +20,7 @@ const navItems = [
   { path: '/',            label: '首页',   icon: '🏠' },
   { path: '/diary',       label: '日记',   icon: '📖' },
   { path: '/gallery',     label: '相册',   icon: '🖼' },
-  { path: '/anniversary', label: '纪念日', icon: '🎂' },
+  { path: '/stats',        label: 'STATS', icon: '📊' },
 ]
 
 function logout() {

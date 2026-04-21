@@ -102,3 +102,20 @@ class ConfigOut(BaseModel):
     quote: str
     love_days: int
     users: list[UserOut]
+
+
+# ── Counter ───────────────────────────────────────────────────────────────────
+
+class CounterCreate(BaseModel):
+    title: str
+    emoji: str = "✨"
+
+class CounterOut(BaseModel):
+    id: int
+    title: str
+    emoji: str
+    count: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

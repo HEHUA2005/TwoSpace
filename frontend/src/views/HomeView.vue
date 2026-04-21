@@ -103,10 +103,6 @@ function formatDate(dt) {
           <span class="sc-icon">🖼</span>
           <span>相册</span>
         </button>
-        <button class="shortcut-btn card" @click="router.push('/anniversary')">
-          <span class="sc-icon">🎂</span>
-          <span>纪念日</span>
-        </button>
       </section>
 
       <!-- 最近日记（大图卡片流） -->
@@ -222,7 +218,7 @@ function formatDate(dt) {
 /* ── 快捷入口 ───────────────────────────────────── */
 .shortcuts {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   margin: 20px 0;
 }
