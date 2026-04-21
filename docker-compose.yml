@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: ./backend
+    container_name: twospace-backend
+    restart: unless-stopped
+    volumes:
+      - ./data/uploads:/app/uploads
+      - ./data/db:/app/db
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - USER1_NAME=${USER1_NAME}
+      - USER1_AVATAR=${USER1_AVATAR}
+      - USER1_PASSWORD_HASH=${USER1_PASSWORD_HASH}
+      - USER2_NAME=${USER2_NAME}
+      - USER2_AVATAR=${USER2_AVATAR}
+      - USER2_PASSWORD_HASH=${USER2_PASSWORD_HASH}
+      - LOVE_START_DATE=${LOVE_START_DATE}
+      - COUPLE_PHOTO=${COUPLE_PHOTO}
+      - QUOTES=${QUOTES}
+      - CORS_ORIGINS=https://${DOMAIN}
+      - UPLOAD_DIR=/app/uploads
+    ports:
+      - "127.0.0.1:8000:8000"
