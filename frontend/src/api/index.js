@@ -19,7 +19,8 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       const auth = useAuthStore()
       auth.logout()
-      window.location.href = '/login'
+      // 用 router 跳转避免整页刷新闪白；若 router 不可用则降级
+      import('../router').then(({ default: router }) => router.replace('/login'))
     }
     return Promise.reject(err)
   }
