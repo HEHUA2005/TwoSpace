@@ -3,6 +3,7 @@ node_modules/
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 
 # 构建产物
 frontend/dist/
@@ -10,8 +11,19 @@ frontend/dist/
 # 环境变量（含密码）
 .env
 
-# 数据（本地数据库和上传图片）
+# 数据目录（上传图片）
 data/
+
+# 数据库文件
+*.db
+*.db-shm
+*.db-wal
+backend/db/
+
+# Python 虚拟环境
+.venv/
+venv/
 
 # 系统文件
 .DS_Store
+Thumbs.db

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import NavBar from '../components/NavBar.vue'
 import ImageModal from '../components/ImageModal.vue'
@@ -7,21 +7,64 @@ import api from '../api'
 
 const auth = useAuthStore()
 
-// 列表
 const diaries = ref([])
 const total = ref(0)
 const page = ref(1)
 const limit = 20
 const loadingList = ref(false)
 
+// 当前阅读到第几篇（0-based）
+const current = ref(0)
+const pageRefs = ref([])
+
+// 日历状态
+const calYear  = ref(new Date().getFullYear())
+const calMonth = ref(new Date().getMonth()) // 0-based
+
+// 日记日期索引 Map: 'YYYY-MM-DD' -> 日记在 diaries 数组中的下标
+const diaryDateMap = computed(() => {
+  const map = {}
+  diaries.value.forEach((d, idx) => {
+    const key = d.created_at.slice(0, 10)
+    if (!(key in map)) map[key] = idx  // 同一天多篇取第一篇
+  })
+  return map
+})
+
+// 当前日历月的所有格子（含前后补白）
+const calDays = computed(() => {
+  const year = calYear.value
+  const month = calMonth.value
+  const firstDay = new Date(year, month, 1).getDay() // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells = []
+  // 前补白（周一为第一列，调整 Sunday=0 → 7）
+  const startPad = (firstDay === 0 ? 7 : firstDay) - 1
+  for (let i = 0; i < startPad; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  return cells
+})
+
+function calDateKey(day) {
+  return `${calYear.value}-${String(calMonth.value + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+}
+
+function prevMonth() {
+  if (calMonth.value === 0) { calYear.value--; calMonth.value = 11 }
+  else calMonth.value--
+}
+function nextMonth() {
+  if (calMonth.value === 11) { calYear.value++; calMonth.value = 0 }
+  else calMonth.value++
+}
+
+const MONTH_NAMES = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+const WEEK_DAYS   = ['一','二','三','四','五','六','日']
+
 // 新建/编辑表单
 const showForm = ref(false)
 const editTarget = ref(null)
 const form = ref({ title: '', content: '', mood: 'love', date: '' })
-
-function todayStr() {
-  return new Date().toISOString().slice(0, 10)
-}
 const submitting = ref(false)
 const uploadingImages = ref([])
 
@@ -49,29 +92,49 @@ async function loadDiaries() {
   loadingList.value = false
 }
 
-onMounted(loadDiaries)
+onMounted(() => {
+  loadDiaries()
+
+  // 监听滚动，更新当前页索引（用于高亮索引栏）
+  const container = document.querySelector('.diary-scroll')
+  if (!container) return
+  container.addEventListener('scroll', onScroll, { passive: true })
+})
+
+onUnmounted(() => {
+  const container = document.querySelector('.diary-scroll')
+  container?.removeEventListener('scroll', onScroll)
+})
+
+function onScroll() {
+  const container = document.querySelector('.diary-scroll')
+  if (!container) return
+  const scrollTop = container.scrollTop
+  const height = container.clientHeight
+  current.value = Math.round(scrollTop / height)
+}
+
+function scrollTo(idx) {
+  const container = document.querySelector('.diary-scroll')
+  if (!container) return
+  container.scrollTo({ top: idx * container.clientHeight, behavior: 'smooth' })
+}
 
 function openCreate() {
   editTarget.value = null
-  form.value = { title: '', content: '', mood: 'love', date: todayStr() }
+  form.value = { title: '', content: '', mood: 'love', date: new Date().toISOString().slice(0, 10) }
   showForm.value = true
 }
 
 function openEdit(d) {
   editTarget.value = d
-  form.value = {
-    title: d.title,
-    content: d.content,
-    mood: d.mood,
-    date: d.created_at.slice(0, 10),
-  }
+  form.value = { title: d.title, content: d.content, mood: d.mood, date: d.created_at.slice(0, 10) }
   showForm.value = true
 }
 
 async function submitForm() {
   if (!form.value.title.trim()) return
   submitting.value = true
-  // 将日期字符串转为 ISO datetime（取当天 00:00 本地时间）
   const payload = {
     title: form.value.title,
     content: form.value.content,
@@ -97,21 +160,17 @@ async function deleteDiary(d) {
   await loadDiaries()
 }
 
-async function uploadImages(diaryId, files) {
-  for (const file of files) {
-    const fd = new FormData()
-    fd.append('file', file)
-    await api.post(`/diaries/${diaryId}/images`, fd)
-  }
-  await loadDiaries()
-}
-
 async function onFileChange(e, diary) {
   const files = [...e.target.files]
   if (!files.length) return
   uploadingImages.value.push(diary.id)
   try {
-    await uploadImages(diary.id, files)
+    for (const file of files) {
+      const fd = new FormData()
+      fd.append('file', file)
+      await api.post(`/diaries/${diary.id}/images`, fd)
+    }
+    await loadDiaries()
   } finally {
     uploadingImages.value = uploadingImages.value.filter(id => id !== diary.id)
     e.target.value = ''
@@ -130,113 +189,213 @@ function openPreview(images, idx) {
 }
 
 const canEdit = (d) => d.author_id === auth.user?.id
+
+// 根据图片数量返回图片网格的 class
+function imgGridClass(n) {
+  if (n === 1) return 'grid-1'
+  if (n === 2) return 'grid-2'
+  if (n === 3) return 'grid-3'
+  if (n === 4) return 'grid-4'
+  if (n === 5) return 'grid-5'
+  return 'grid-many'
+}
+
+// 加载下一批
+async function loadMore() {
+  page.value++
+  loadingList.value = true
+  const { data } = await api.get(`/diaries?page=${page.value}&limit=${limit}`)
+  diaries.value.push(...data.items)
+  total.value = data.total
+  loadingList.value = false
+}
 </script>
 
 <template>
   <div class="page">
     <NavBar />
-    <main class="diary-page">
-      <div class="page-header">
-        <h1>日记</h1>
-        <button class="btn btn-primary" @click="openCreate">✏️ 写日记</button>
-      </div>
 
-      <!-- 表单弹窗 -->
-      <div class="modal-overlay" v-if="showForm" @click.self="showForm = false">
-        <div class="modal card">
-          <h2>{{ editTarget ? '编辑日记' : '新建日记' }}</h2>
-          <div class="form-group">
-            <label>标题</label>
-            <input v-model="form.title" placeholder="今天发生了什么..." />
-          </div>
-          <div class="form-group">
-            <label>心情</label>
-            <div class="mood-select">
-              <button
-                v-for="m in moodOptions"
-                :key="m.value"
-                :class="['mood-btn', { active: form.mood === m.value }]"
-                @click="form.mood = m.value"
-              >{{ m.label }}</button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>日期</label>
-            <input type="date" v-model="form.date" :max="todayStr()" />
-          </div>
-          <div class="form-group">
-            <label>内容</label>
-            <textarea v-model="form.content" placeholder="写下你的故事..." rows="6" />
-          </div>
-          <div class="form-actions">
-            <button class="btn btn-ghost" @click="showForm = false">取消</button>
-            <button class="btn btn-primary" @click="submitForm" :disabled="submitting">
-              {{ submitting ? '保存中...' : '保存' }}
-            </button>
+    <div class="diary-layout">
+      <!-- 左侧日历索引 -->
+      <aside class="index-bar" v-if="diaries.length">
+        <!-- 月份导航 -->
+        <div class="cal-header">
+          <button class="cal-nav" @click="prevMonth">‹</button>
+          <span class="cal-title">{{ calYear }} 年 {{ MONTH_NAMES[calMonth] }}</span>
+          <button class="cal-nav" @click="nextMonth">›</button>
+        </div>
+
+        <!-- 星期标题 -->
+        <div class="cal-weekdays">
+          <span v-for="w in WEEK_DAYS" :key="w">{{ w }}</span>
+        </div>
+
+        <!-- 日期格子 -->
+        <div class="cal-grid">
+          <div
+            v-for="(day, i) in calDays"
+            :key="i"
+            :class="[
+              'cal-cell',
+              {
+                empty: !day,
+                'has-diary': day && calDateKey(day) in diaryDateMap,
+                active: day && diaries[current] && calDateKey(day) === diaries[current].created_at.slice(0,10),
+                today: day && calDateKey(day) === new Date().toISOString().slice(0,10),
+              }
+            ]"
+            @click="day && calDateKey(day) in diaryDateMap && scrollTo(diaryDateMap[calDateKey(day)])"
+          >
+            <span v-if="day">{{ day }}</span>
+            <!-- 有日记的圆点 -->
+            <span
+              v-if="day && calDateKey(day) in diaryDateMap"
+              class="cal-dot"
+              :class="`dot-${diaries[diaryDateMap[calDateKey(day)]]?.mood}`"
+            ></span>
           </div>
         </div>
-      </div>
 
-      <!-- 时间轴 -->
-      <div v-if="loadingList" class="loading">加载中...</div>
-      <div v-else-if="!diaries.length" class="empty">还没有日记，去写第一篇吧 💕</div>
-      <div v-else class="timeline">
-        <div v-for="d in diaries" :key="d.id" class="timeline-item">
-          <div class="timeline-dot" :class="`mood-dot-${d.mood}`"></div>
-          <div class="diary-card card">
-            <div class="card-header">
-              <div class="card-meta">
-                <span :class="['mood-tag', `mood-${d.mood}`]">{{ moodEmoji[d.mood] }}</span>
-                <span class="author">{{ d.author_name }}</span>
-                <span class="date">{{ formatDate(d.created_at) }}</span>
-              </div>
-              <div class="card-actions" v-if="canEdit(d)">
-                <button class="icon-btn" @click="openEdit(d)" title="编辑">✏️</button>
-                <button class="icon-btn" @click="deleteDiary(d)" title="删除">🗑</button>
-              </div>
+        <div class="cal-legend">
+          <span class="legend-item"><i class="dot-love"></i> 甜蜜</span>
+          <span class="legend-item"><i class="dot-happy"></i> 开心</span>
+          <span class="legend-item"><i class="dot-sad"></i> 难过</span>
+        </div>
+
+        <button class="btn btn-primary write-btn" @click="openCreate">✏️ 写日记</button>
+      </aside>
+
+      <!-- 主内容：全屏分页滚动 -->
+      <div class="diary-scroll">
+
+        <!-- 空状态 -->
+        <div v-if="!loadingList && !diaries.length" class="empty-page">
+          <p>还没有日记，去写第一篇吧 💕</p>
+          <button class="btn btn-primary" @click="openCreate">✏️ 写日记</button>
+        </div>
+
+        <!-- 每篇日记占一屏 -->
+        <div
+          v-for="(d, idx) in diaries"
+          :key="d.id"
+          class="diary-page-item"
+        >
+          <!-- 顶部信息条 -->
+          <div class="dp-header">
+            <div class="dp-meta">
+              <span :class="['mood-tag', `mood-${d.mood}`]">{{ moodEmoji[d.mood] }}</span>
+              <span class="dp-author">{{ d.author_name }}</span>
+              <span class="dp-date">{{ formatDate(d.created_at) }}</span>
             </div>
-            <h3 class="diary-title">{{ d.title }}</h3>
-            <p class="diary-content" v-if="d.content">{{ d.content }}</p>
+            <div class="dp-actions" v-if="canEdit(d)">
+              <button class="icon-btn" @click="openEdit(d)">✏️</button>
+              <button class="icon-btn" @click="deleteDiary(d)">🗑</button>
+            </div>
+          </div>
 
-            <!-- 图片网格 -->
-            <div class="image-grid" v-if="d.images.length">
-              <img
-                v-for="(img, idx) in d.images"
+          <!-- 标题 -->
+          <h2 class="dp-title">{{ d.title }}</h2>
+
+          <!-- 内容区：文字 + 图片并排 -->
+          <div class="dp-body" :class="{ 'has-images': d.images.length }">
+            <!-- 文字 -->
+            <p class="dp-content" v-if="d.content">{{ d.content }}</p>
+            <p class="dp-content empty-content" v-else>（没有文字）</p>
+
+            <!-- 图片区 -->
+            <div
+              class="dp-images"
+              :class="imgGridClass(d.images.length + (canEdit(d) ? 1 : 0))"
+              v-if="d.images.length"
+            >
+              <div
+                v-for="(img, imgIdx) in d.images"
                 :key="img.id"
-                :src="img.url"
-                class="diary-img"
-                @click="openPreview(d.images, idx)"
-              />
-              <!-- 删除图片按钮（仅作者） -->
-              <template v-if="canEdit(d)">
-                <div
-                  v-for="img in d.images"
-                  :key="`del-${img.id}`"
-                  class="img-del-wrap"
-                >
-                  <button class="img-del-btn" @click.stop="deleteImage(d, img.id)">×</button>
-                </div>
-              </template>
-            </div>
-
-            <!-- 上传图片 -->
-            <div class="upload-area" v-if="canEdit(d)">
-              <label :class="['upload-btn', { uploading: uploadingImages.includes(d.id) }]">
+                class="dp-img-wrap"
+              >
+                <img
+                  :src="img.url"
+                  class="dp-img"
+                  loading="lazy"
+                  @click="openPreview(d.images, imgIdx)"
+                />
+                <button
+                  v-if="canEdit(d)"
+                  class="dp-img-del"
+                  @click.stop="deleteImage(d, img.id)"
+                >×</button>
+              </div>
+              <!-- 上传占位格 -->
+              <label v-if="canEdit(d)" :class="['dp-upload', { uploading: uploadingImages.includes(d.id) }]">
                 <input type="file" accept="image/*" multiple hidden @change="e => onFileChange(e, d)" />
-                {{ uploadingImages.includes(d.id) ? '上传中...' : '+ 添加图片' }}
+                <span>+</span>
               </label>
             </div>
           </div>
+
+          <!-- 无图时的上传入口 -->
+          <div class="upload-row" v-if="canEdit(d) && !d.images.length">
+            <label :class="['upload-btn', { uploading: uploadingImages.includes(d.id) }]">
+              <input type="file" accept="image/*" multiple hidden @change="e => onFileChange(e, d)" />
+              {{ uploadingImages.includes(d.id) ? '上传中...' : '+ 添加图片' }}
+            </label>
+          </div>
+
+          <!-- 翻页提示 -->
+          <div class="dp-nav">
+            <button class="dp-nav-btn" v-if="idx > 0" @click="scrollTo(idx - 1)">↑ 上一篇</button>
+            <button
+              class="dp-nav-btn dp-nav-next"
+              v-if="idx < diaries.length - 1"
+              @click="scrollTo(idx + 1)"
+            >↓ 下一篇</button>
+            <button
+              class="dp-nav-btn dp-nav-more"
+              v-if="idx === diaries.length - 1 && diaries.length < total"
+              @click="loadMore"
+              :disabled="loadingList"
+            >{{ loadingList ? '加载中...' : '加载更多 ↓' }}</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 表单弹窗 -->
+    <div class="modal-overlay" v-if="showForm" @click.self="showForm = false">
+      <div class="modal card">
+        <h2>{{ editTarget ? '编辑日记' : '新建日记' }}</h2>
+        <div class="form-group">
+          <label>标题</label>
+          <input v-model="form.title" placeholder="今天发生了什么..." />
+        </div>
+        <div class="form-group">
+          <label>心情</label>
+          <div class="mood-select">
+            <button
+              v-for="m in moodOptions"
+              :key="m.value"
+              :class="['mood-btn', { active: form.mood === m.value }]"
+              @click="form.mood = m.value"
+            >{{ m.label }}</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>日期</label>
+          <input type="date" v-model="form.date" :max="new Date().toISOString().slice(0,10)" />
+        </div>
+        <div class="form-group">
+          <label>内容</label>
+          <textarea v-model="form.content" placeholder="写下你的故事..." rows="6" />
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-ghost" @click="showForm = false">取消</button>
+          <button class="btn btn-primary" @click="submitForm" :disabled="submitting">
+            {{ submitting ? '保存中...' : '保存' }}
+          </button>
         </div>
       </div>
-
-      <!-- 分页 -->
-      <div class="pagination" v-if="total > limit">
-        <button class="btn btn-ghost" :disabled="page === 1" @click="page--; loadDiaries()">上一页</button>
-        <span>{{ page }} / {{ Math.ceil(total / limit) }}</span>
-        <button class="btn btn-ghost" :disabled="page * limit >= total" @click="page++; loadDiaries()">下一页</button>
-      </div>
-    </main>
+    </div>
 
     <ImageModal
       v-if="showPreview"
@@ -248,109 +407,366 @@ const canEdit = (d) => d.author_id === auth.user?.id
 </template>
 
 <style scoped>
-.page { min-height: 100vh; }
-.diary-page { max-width: 720px; margin: 0 auto; padding: 32px 16px 60px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
-.page-header h1 { font-size: 24px; font-weight: 700; }
-.empty { text-align: center; padding: 60px; color: var(--text-muted); }
+.page { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
-/* 时间轴 */
-.timeline { position: relative; padding-left: 24px; }
-.timeline::before {
-  content: '';
-  position: absolute;
-  left: 8px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: linear-gradient(to bottom, var(--pink), transparent);
+/* ── 整体布局 ──────────────────────────────────── */
+.diary-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
 }
-.timeline-item { position: relative; margin-bottom: 28px; }
-.timeline-dot {
-  position: absolute;
-  left: -20px;
-  top: 20px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid #fff;
+
+/* ── 左侧日历索引 ──────────────────────────────── */
+.index-bar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 14px 16px;
+  border-right: 1px solid rgba(249,164,201,0.2);
+  background: rgba(255,249,251,0.7);
+  backdrop-filter: blur(8px);
+  gap: 10px;
 }
-.mood-dot-love  { background: var(--pink-dark); }
-.mood-dot-happy { background: #f59e0b; }
-.mood-dot-sad   { background: #60a5fa; }
 
-.diary-card { padding: 20px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.card-meta { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); }
-.card-actions { display: flex; gap: 4px; }
-.icon-btn { background: none; font-size: 15px; padding: 4px; border-radius: 6px; transition: background 0.15s; }
-.icon-btn:hover { background: var(--pink-light); }
-.diary-title { font-size: 17px; font-weight: 600; margin-bottom: 10px; }
-.diary-content { font-size: 14px; line-height: 1.8; color: var(--text); white-space: pre-wrap; margin-bottom: 14px; }
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cal-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.cal-nav {
+  background: none;
+  font-size: 18px;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+}
+.cal-nav:hover { background: var(--pink-light); color: var(--pink-dark); }
 
-/* 图片 */
-.image-grid {
+.cal-weekdays {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
 }
-.diary-img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-.diary-img:hover { transform: scale(1.03); }
+.cal-weekdays span { font-size: 10px; color: var(--text-muted); padding: 2px 0; }
 
-.upload-area { margin-top: 8px; }
-.upload-btn {
-  display: inline-block;
-  padding: 6px 14px;
-  border-radius: 50px;
-  font-size: 13px;
-  background: var(--pink-light);
-  color: var(--pink-dark);
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-cell {
+  position: relative;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: default;
+  transition: background 0.15s;
+  user-select: none;
+}
+.cal-cell.empty { pointer-events: none; }
+.cal-cell.today { font-weight: 700; color: var(--text); }
+.cal-cell.today > span { text-decoration: underline; text-underline-offset: 2px; }
+.cal-cell.has-diary {
   cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+}
+.cal-cell.has-diary:hover { background: var(--pink-light); }
+.cal-cell.active {
+  background: var(--pink-dark);
+  color: #fff;
+}
+.cal-cell.active .cal-dot { background: #fff !important; }
+
+.cal-dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  position: absolute;
+  bottom: 3px;
+}
+.dot-love  { background: var(--pink-dark); }
+.dot-happy { background: #f59e0b; }
+.dot-sad   { background: #60a5fa; }
+
+.cal-legend {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.legend-item i {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  font-style: normal;
+}
+
+.write-btn {
+  margin-top: auto;
+  justify-content: center;
+  font-size: 13px;
+  padding: 9px 12px;
+}
+
+/* ── 分页滚动容器 ───────────────────────────────── */
+.diary-scroll {
+  flex: 1;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+}
+/* 隐藏滚动条但保留功能 */
+.diary-scroll::-webkit-scrollbar { display: none; }
+.diary-scroll { scrollbar-width: none; }
+
+/* ── 每篇日记（一屏） ──────────────────────────── */
+.diary-page-item {
+  height: 100vh;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 48px 24px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.empty-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+/* 顶部信息条 */
+.dp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.dp-meta { display: flex; align-items: center; gap: 10px; }
+.dp-author, .dp-date { font-size: 13px; color: var(--text-muted); }
+.dp-actions { display: flex; gap: 4px; }
+.icon-btn {
+  background: none; font-size: 15px; padding: 4px 6px;
+  border-radius: 6px; transition: background 0.15s;
+}
+.icon-btn:hover { background: var(--pink-light); }
+
+/* 标题 */
+.dp-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 16px;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+
+/* 内容区 */
+.dp-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+  min-height: 0;
+}
+.dp-body.has-images {
+  flex-direction: row;
+  gap: 24px;
+}
+
+/* 文字 */
+.dp-content {
+  font-size: 15px;
+  line-height: 1.9;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-y: auto;
+  flex: 1;
+  min-width: 0;
+}
+.dp-content::-webkit-scrollbar { width: 4px; }
+.empty-content { color: var(--text-muted); font-style: italic; }
+
+/* 图片区 —— 撑满右侧高度 */
+.dp-images {
+  display: grid;
+  gap: 6px;
+  /* 宽度和高度由父容器决定 */
+  width: 45%;
+  flex-shrink: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 1张：单格全占 */
+.dp-images.grid-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+/* 2张：上下两行 */
+.dp-images.grid-2 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* 3张：左边1大 + 右边2小叠放 */
+.dp-images.grid-3 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.dp-images.grid-3 .dp-img-wrap:first-child,
+.dp-images.grid-3 .dp-upload:first-child {
+  grid-row: 1 / 3;
+}
+
+/* 4张：2×2 */
+.dp-images.grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* 5张：左2列 + 右3列各一行，用 2×3 网格，第1格跨行 */
+.dp-images.grid-5 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+}
+.dp-images.grid-5 .dp-img-wrap:first-child,
+.dp-images.grid-5 .dp-upload:first-child {
+  grid-row: 1 / 3;
+}
+
+/* 6张及以上：3列，行数自动均分 */
+.dp-images.grid-many {
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
+}
+
+.dp-img-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  min-height: 0;
+}
+.dp-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+  transition: transform 0.25s;
+  display: block;
+}
+.dp-img:hover { transform: scale(1.04); }
+.dp-img-del {
+  position: absolute;
+  top: 5px; right: 5px;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
   transition: background 0.2s;
+}
+.dp-img-del:hover { background: rgba(220,38,38,0.85); }
+
+/* 上传占位格 */
+.dp-upload {
+  border-radius: 10px;
+  border: 2px dashed #f0d0df;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px;
+  color: var(--pink);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  min-height: 0;
+}
+.dp-upload:hover { border-color: var(--pink-dark); background: var(--pink-light); }
+.dp-upload.uploading { opacity: 0.5; cursor: not-allowed; }
+
+/* 无图时上传 */
+.upload-row { margin-top: 8px; flex-shrink: 0; }
+.upload-btn {
+  display: inline-block; padding: 6px 16px;
+  border-radius: 50px; font-size: 13px;
+  background: var(--pink-light); color: var(--pink-dark);
+  cursor: pointer; transition: background 0.2s;
 }
 .upload-btn:hover { background: #f9d4e5; }
 .upload-btn.uploading { opacity: 0.6; cursor: not-allowed; }
 
-/* 弹窗 */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.4);
+/* 翻页按钮 */
+.dp-nav {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-  padding: 16px;
+  gap: 10px;
+  margin-top: 16px;
+  flex-shrink: 0;
+  justify-content: flex-end;
 }
-.modal {
-  width: 100%;
-  max-width: 520px;
-  max-height: 90vh;
-  overflow-y: auto;
+.dp-nav-btn {
+  font-size: 13px;
+  color: var(--text-muted);
+  background: none;
+  padding: 4px 10px;
+  border-radius: 50px;
+  transition: background 0.15s, color 0.15s;
 }
+.dp-nav-btn:hover { background: var(--pink-light); color: var(--pink-dark); }
+.dp-nav-next { color: var(--pink-dark); font-weight: 500; }
+.dp-nav-more { color: var(--pink-dark); font-weight: 500; }
+
+/* ── 表单弹窗 ──────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200; padding: 16px;
+}
+.modal { width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; }
 .modal h2 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
 .mood-select { display: flex; gap: 8px; }
 .mood-btn {
-  flex: 1;
-  padding: 8px;
-  border-radius: 10px;
-  font-size: 13px;
-  background: var(--pink-light);
-  color: var(--text);
-  transition: all 0.2s;
+  flex: 1; padding: 8px; border-radius: 10px; font-size: 13px;
+  background: var(--pink-light); color: var(--text); transition: all 0.2s;
 }
 .mood-btn.active { background: var(--pink-dark); color: #fff; }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 
-.pagination { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 32px; }
+/* 响应式：窄屏隐藏索引栏 */
+@media (max-width: 640px) {
+  .index-bar { display: none; }
+  .diary-page-item { padding: 20px 20px 16px; }
+  .dp-body.has-images { flex-direction: column; }
+  .dp-body.has-images .dp-images { width: 100%; }
+  .dp-title { font-size: 20px; }
+}
 </style>
