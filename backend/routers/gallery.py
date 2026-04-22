@@ -29,7 +29,7 @@ async def list_gallery(
         GalleryImageOut(
             id=img.id,
             filename=img.filename,
-            url=f"/api/uploads/{img.filename}",
+            url=f"/uploads/{img.filename}",
             diary_id=img.diary_id,
             diary_title=title,
             created_at=img.created_at,

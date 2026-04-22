@@ -1,19 +1,19 @@
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from database import init_db
-from auth import get_current_user
 from routers import auth, diary, gallery, anniversary, config, counter
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 
+# 在模块加载时就创建目录，StaticFiles 挂载前必须存在
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 Path("./db").mkdir(parents=True, exist_ok=True)
 
@@ -41,10 +41,5 @@ app.include_router(anniversary.router)
 app.include_router(config.router)
 app.include_router(counter.router)
 
-
-@app.get("/api/uploads/{filename}")
-async def serve_upload(filename: str, _: dict = Depends(get_current_user)):
-    path = UPLOAD_DIR / filename
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404)
-    return FileResponse(path)
+# 静态文件（上传的图片）
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
