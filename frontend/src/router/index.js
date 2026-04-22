@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
 
 const routes = [
   { path: '/login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
@@ -16,7 +15,8 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
+  const { useAuthStore } = await import('../stores/auth')
   const auth = useAuthStore()
   if (!to.meta.public && !auth.isLoggedIn) {
     return '/login'

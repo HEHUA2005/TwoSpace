@@ -17,10 +17,10 @@ onMounted(() => window.addEventListener('scroll', onScroll, { passive: true }))
 onUnmounted(() => window.removeEventListener('scroll', onScroll))
 
 const navItems = [
-  { path: '/',            label: '首页',   icon: '🏠' },
-  { path: '/diary',       label: '日记',   icon: '📖' },
-  { path: '/gallery',     label: '相册',   icon: '🖼' },
-  { path: '/stats',        label: 'STATS', icon: '📊' },
+  { path: '/',        label: '首页',  icon: '🏠' },
+  { path: '/diary',   label: '日记',  icon: '📖' },
+  { path: '/gallery', label: '相册',  icon: '🖼'  },
+  { path: '/stats',   label: 'STATS', icon: '📊' },
 ]
 
 function logout() {
@@ -30,6 +30,7 @@ function logout() {
 </script>
 
 <template>
+  <!-- 桌面端顶部导航 -->
   <nav class="navbar" :class="{ scrolled }">
     <RouterLink to="/" class="brand">💕 TwoSpace</RouterLink>
     <div class="nav-links">
@@ -56,9 +57,24 @@ function logout() {
       <button class="btn btn-ghost logout-btn" @click="logout">退出</button>
     </div>
   </nav>
+
+  <!-- 移动端底部 Tab Bar -->
+  <nav class="tab-bar">
+    <RouterLink
+      v-for="item in navItems"
+      :key="item.path"
+      :to="item.path"
+      class="tab-item"
+      :class="{ active: route.path === item.path }"
+    >
+      <span class="tab-icon">{{ item.icon }}</span>
+      <span class="tab-label">{{ item.label }}</span>
+    </RouterLink>
+  </nav>
 </template>
 
 <style scoped>
+/* ── 桌面端顶部导航 ── */
 .navbar {
   position: sticky;
   top: 0;
@@ -124,4 +140,46 @@ function logout() {
 .navbar.scrolled .user-avatar { width: 28px; height: 28px; }
 .user-name { font-size: 13px; color: var(--text-muted); }
 .logout-btn { padding: 5px 12px; font-size: 13px; }
+
+/* 移动端隐藏顶部导航 */
+@media (max-width: 640px) {
+  .navbar { display: none; }
+}
+
+/* ── 移动端底部 Tab Bar ── */
+.tab-bar {
+  display: none;
+}
+@media (max-width: 640px) {
+  .tab-bar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: rgba(255, 249, 251, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(249, 164, 201, 0.3);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tab-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 0 6px;
+    gap: 3px;
+    color: var(--text-muted);
+    transition: color 0.2s;
+    text-decoration: none;
+  }
+  .tab-item.active {
+    color: var(--pink-dark);
+  }
+  .tab-icon { font-size: 22px; line-height: 1; }
+  .tab-label { font-size: 10px; font-weight: 500; }
+}
 </style>

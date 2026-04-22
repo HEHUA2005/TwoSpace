@@ -44,11 +44,13 @@ onMounted(async () => {
   )
   document.querySelectorAll('.reveal').forEach(el => revealObs.observe(el))
 
-  // 滑到底部自动跳日记页（sentinel 在日记列表末尾，需日记加载后才存在）
+  // 滑到底部自动跳日记页
   if (sentinel.value) {
+    let activated = false
+    setTimeout(() => { activated = true }, 800)
     const sentinelObs = new IntersectionObserver(
-      ([e]) => { if (e.isIntersecting) router.push('/diary') },
-      { threshold: 1.0 }
+      ([e]) => { if (e.isIntersecting && activated) router.push('/diary') },
+      { threshold: 0.5 }
     )
     sentinelObs.observe(sentinel.value)
   }

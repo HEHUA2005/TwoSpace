@@ -62,7 +62,7 @@ function nextMonth() {
 const MONTH_NAMES = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
 const WEEK_DAYS   = ['一','二','三','四','五','六','日']
 
-// 新建/编辑表单
+const showSidebar = ref(false)
 const showForm = ref(false)
 const editTarget = ref(null)
 const form = ref({ title: '', content: '', mood: 'love', date: '' })
@@ -227,8 +227,11 @@ async function loadMore() {
     <NavBar />
 
     <div class="diary-layout">
+      <!-- 移动端侧边栏遮罩 -->
+      <div class="sidebar-mask" v-if="showSidebar" @click="showSidebar = false"></div>
+
       <!-- 左侧日历索引 -->
-      <aside class="index-bar" v-if="diaries.length">
+      <aside class="index-bar" :class="{ 'sidebar-open': showSidebar }" v-if="diaries.length">
         <!-- 月份导航 -->
         <div class="cal-header">
           <button class="cal-nav" @click="prevMonth">‹</button>
@@ -277,6 +280,8 @@ async function loadMore() {
         <button class="order-btn" @click="toggleOrder" :title="order === 'desc' ? '当前：最新在前' : '当前：最早在前'">
           {{ order === 'desc' ? '↓ 最新' : '↑ 最早' }}
         </button>
+        <!-- 移动端关闭侧边栏 -->
+        <button class="sidebar-close" @click="showSidebar = false">关闭 ×</button>
       </aside>
 
       <!-- 主内容：全屏分页滚动 -->
@@ -417,11 +422,17 @@ async function loadMore() {
       :index="previewIndex"
       @close="showPreview = false"
     />
+
+    <!-- 移动端悬浮按钮组 -->
+    <div class="fab-group">
+      <button class="fab-write" @click="openCreate">✏️ 写日记</button>
+      <button class="fab-calendar" v-if="diaries.length" @click="showSidebar = true">📅</button>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.page { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ── 整体布局 ──────────────────────────────────── */
 .diary-layout {
@@ -556,6 +567,8 @@ async function loadMore() {
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
   scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 /* 隐藏滚动条但保留功能 */
 .diary-scroll::-webkit-scrollbar { display: none; }
@@ -563,7 +576,7 @@ async function loadMore() {
 
 /* ── 每篇日记（一屏） ──────────────────────────── */
 .diary-page-item {
-  height: 100vh;
+  height: 100dvh;
   scroll-snap-align: start;
   display: flex;
   flex-direction: column;
@@ -576,7 +589,7 @@ async function loadMore() {
 }
 
 .empty-page {
-  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -787,12 +800,98 @@ async function loadMore() {
 .mood-btn.active { background: var(--pink-dark); color: #fff; }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 
-/* 响应式：窄屏隐藏索引栏 */
+/* 响应式：窄屏侧边栏改为抽屉 */
+.sidebar-mask { display: none; }
+.sidebar-close { display: none; }
+.fab-group { display: none; }
+
 @media (max-width: 640px) {
-  .index-bar { display: none; }
-  .diary-page-item { padding: 20px 20px 16px; }
+  /* 遮罩 */
+  .sidebar-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 90;
+  }
+
+  /* 侧边栏默认隐藏，滑入时显示 */
+  .index-bar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 95;
+    width: 240px;
+    transform: translateX(-100%);
+    transition: transform 0.28s ease;
+    box-shadow: 4px 0 24px rgba(232,116,158,0.15);
+  }
+  .index-bar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* 关闭按钮 */
+  .sidebar-close {
+    display: block;
+    margin-top: 4px;
+    width: 100%;
+    padding: 8px;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+    background: none;
+    border: 1.5px solid #f0d0df;
+    cursor: pointer;
+  }
+
+  .diary-page-item { padding: 16px 18px calc(80px + env(safe-area-inset-bottom)) 18px; }
   .dp-body.has-images { flex-direction: column; }
-  .dp-body.has-images .dp-images { width: 100%; }
+  .dp-body.has-images .dp-images { width: 100%; height: 45vw; }
   .dp-title { font-size: 20px; }
+  .dp-nav { justify-content: center; }
+
+  /* 悬浮按钮组 */
+  .fab-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    position: fixed;
+    right: 20px;
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    z-index: 50;
+  }
+  .fab-write {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--pink-dark);
+    color: #fff;
+    border: none;
+    border-radius: 50px;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 600;
+    box-shadow: 0 4px 20px rgba(232,116,158,0.45);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .fab-write:active { transform: scale(0.95); }
+  .fab-calendar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255,249,251,0.95);
+    border: 1.5px solid rgba(249,164,201,0.5);
+    font-size: 20px;
+    box-shadow: 0 2px 12px rgba(232,116,158,0.2);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .fab-calendar:active { transform: scale(0.92); }
 }
 </style>

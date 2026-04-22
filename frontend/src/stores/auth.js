@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import api from '../api'
+import axios from 'axios'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('ts_token') || '')
@@ -9,7 +9,8 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoggedIn = computed(() => !!token.value)
 
   async function login(userId, password) {
-    const { data } = await api.post('/auth/login', { user_id: userId, password })
+    const base = import.meta.env.VITE_API_BASE || '/api'
+    const { data } = await axios.post(`${base}/auth/login`, { user_id: userId, password })
     token.value = data.access_token
     user.value = data.user
     localStorage.setItem('ts_token', data.access_token)
