@@ -26,7 +26,7 @@ def _user_name(author_id: int) -> str:
 
 
 def _image_url(filename: str) -> str:
-    return f"/uploads/{filename}"
+    return f"/api/uploads/{filename}"
 
 
 async def _get_diary_with_images(db: AsyncSession, diary_id: int):
