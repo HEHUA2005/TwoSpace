@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import NavBar from '../components/NavBar.vue'
 import ImageModal from '../components/ImageModal.vue'
@@ -67,7 +67,13 @@ const showForm = ref(false)
 const editTarget = ref(null)
 const form = ref({ title: '', content: '', mood: 'love', date: '' })
 const submitting = ref(false)
-const uploadingImages = ref([])
+const formError = ref('')
+
+// 表单内图片状态
+const formImages = ref([])        // 编辑时已有图片 [{id, url, filename}]
+const formNewFiles = ref([])      // 待上传的新文件 [File]
+const formNewPreviews = ref([])   // 新文件的本地预览 URL
+const formUploading = ref(false)
 
 // 图片预览
 const previewImages = ref([])
@@ -134,63 +140,130 @@ function scrollTo(idx) {
 function openCreate() {
   editTarget.value = null
   form.value = { title: '', content: '', mood: 'love', date: new Date().toISOString().slice(0, 10) }
+  formImages.value = []
+  formNewFiles.value = []
+  formNewPreviews.value = []
+  formError.value = ''
   showForm.value = true
 }
 
 function openEdit(d) {
   editTarget.value = d
   form.value = { title: d.title, content: d.content, mood: d.mood, date: d.created_at.slice(0, 10) }
+  formImages.value = d.images.map(img => ({ id: img.id, url: img.url, filename: img.filename }))
+  formNewFiles.value = []
+  formNewPreviews.value = []
+  formError.value = ''
   showForm.value = true
+}
+
+function onFormFileChange(e) {
+  const files = [...e.target.files]
+  if (!files.length) return
+  files.forEach(f => {
+    formNewFiles.value.push(f)
+    formNewPreviews.value.push(URL.createObjectURL(f))
+  })
+  e.target.value = ''
+}
+
+function removeNewFile(idx) {
+  URL.revokeObjectURL(formNewPreviews.value[idx])
+  formNewFiles.value.splice(idx, 1)
+  formNewPreviews.value.splice(idx, 1)
+}
+
+async function removeExistingImage(img) {
+  if (!editTarget.value) return
+  await api.delete(`/diaries/${editTarget.value.id}/images/${img.id}`)
+  formImages.value = formImages.value.filter(i => i.id !== img.id)
+  // 同步更新阅读视图中的图片列表
+  const idx = diaries.value.findIndex(d => d.id === editTarget.value.id)
+  if (idx !== -1) {
+    diaries.value[idx] = { ...diaries.value[idx], images: diaries.value[idx].images.filter(i => i.id !== img.id) }
+  }
 }
 
 async function submitForm() {
   if (!form.value.title.trim()) return
   submitting.value = true
+  formError.value = ''
   const payload = {
     title: form.value.title,
     content: form.value.content,
     mood: form.value.mood,
-    created_at: form.value.date ? new Date(form.value.date + 'T00:00:00').toISOString() : undefined,
+    created_at: form.value.date ? new Date(form.value.date + 'T12:00:00').toISOString() : undefined,
   }
   try {
     if (editTarget.value) {
+      // 1. 保存文字
       await api.put(`/diaries/${editTarget.value.id}`, payload)
+
+      // 2. 上传新图片
+      if (formNewFiles.value.length) {
+        formUploading.value = true
+        const uploadedImgs = []
+        for (const file of formNewFiles.value) {
+          const fd = new FormData()
+          fd.append('file', file)
+          const { data: imgData } = await api.post(`/diaries/${editTarget.value.id}/images`, fd)
+          uploadedImgs.push(imgData)
+        }
+        formImages.value = [...formImages.value, ...uploadedImgs]
+      }
+
+      // 3. 同步本地列表（用 splice 确保 Vue 响应式更新）
+      const idx = diaries.value.findIndex(d => d.id === editTarget.value.id)
+      if (idx !== -1) {
+        diaries.value.splice(idx, 1, {
+          ...diaries.value[idx],
+          title: payload.title,
+          content: payload.content,
+          mood: payload.mood,
+          created_at: payload.created_at ?? diaries.value[idx].created_at,
+          images: formImages.value.map(img => ({ id: img.id, url: img.url, filename: img.filename, created_at: img.created_at ?? '' })),
+        })
+      }
     } else {
-      await api.post('/diaries', payload)
+      // 新建日记
+      const { data } = await api.post('/diaries', payload)
+      let newDiary = data
+      if (formNewFiles.value.length) {
+        formUploading.value = true
+        for (const file of formNewFiles.value) {
+          const fd = new FormData()
+          fd.append('file', file)
+          await api.post(`/diaries/${data.id}/images`, fd)
+        }
+        const { data: full } = await api.get(`/diaries/${data.id}`)
+        newDiary = full
+      }
+      if (order.value === 'desc') diaries.value.unshift(newDiary)
+      else diaries.value.push(newDiary)
+      total.value++
+      await nextTick()
+      scrollTo(order.value === 'desc' ? 0 : diaries.value.length - 1)
     }
+
+    // 清理预览 URL，关闭弹窗
+    formNewPreviews.value.forEach(u => URL.revokeObjectURL(u))
+    formNewPreviews.value = []
+    formNewFiles.value = []
     showForm.value = false
-    await loadDiaries()
+  } catch (e) {
+    console.error('保存失败', e)
+    formError.value = e?.response?.data?.detail || e?.message || '保存失败，请重试'
   } finally {
     submitting.value = false
+    formUploading.value = false
   }
 }
 
 async function deleteDiary(d) {
   if (!confirm(`确定删除「${d.title}」？`)) return
   await api.delete(`/diaries/${d.id}`)
-  await loadDiaries()
-}
-
-async function onFileChange(e, diary) {
-  const files = [...e.target.files]
-  if (!files.length) return
-  uploadingImages.value.push(diary.id)
-  try {
-    for (const file of files) {
-      const fd = new FormData()
-      fd.append('file', file)
-      await api.post(`/diaries/${diary.id}/images`, fd)
-    }
-    await loadDiaries()
-  } finally {
-    uploadingImages.value = uploadingImages.value.filter(id => id !== diary.id)
-    e.target.value = ''
-  }
-}
-
-async function deleteImage(diary, imgId) {
-  await api.delete(`/diaries/${diary.id}/images/${imgId}`)
-  await loadDiaries()
+  diaries.value = diaries.value.filter(item => item.id !== d.id)
+  total.value--
 }
 
 function openPreview(images, idx) {
@@ -321,10 +394,10 @@ async function loadMore() {
             <p class="dp-content" v-if="d.content">{{ d.content }}</p>
             <p class="dp-content empty-content" v-else>（没有文字）</p>
 
-            <!-- 图片区 -->
+            <!-- 图片区（只读，点击预览） -->
             <div
               class="dp-images"
-              :class="imgGridClass(d.images.length + (canEdit(d) ? 1 : 0))"
+              :class="imgGridClass(d.images.length)"
               v-if="d.images.length"
             >
               <div
@@ -338,26 +411,8 @@ async function loadMore() {
                   loading="lazy"
                   @click="openPreview(d.images, imgIdx)"
                 />
-                <button
-                  v-if="canEdit(d)"
-                  class="dp-img-del"
-                  @click.stop="deleteImage(d, img.id)"
-                >×</button>
               </div>
-              <!-- 上传占位格 -->
-              <label v-if="canEdit(d)" :class="['dp-upload', { uploading: uploadingImages.includes(d.id) }]">
-                <input type="file" accept="image/*" multiple hidden @change="e => onFileChange(e, d)" />
-                <span>+</span>
-              </label>
             </div>
-          </div>
-
-          <!-- 无图时的上传入口 -->
-          <div class="upload-row" v-if="canEdit(d) && !d.images.length">
-            <label :class="['upload-btn', { uploading: uploadingImages.includes(d.id) }]">
-              <input type="file" accept="image/*" multiple hidden @change="e => onFileChange(e, d)" />
-              {{ uploadingImages.includes(d.id) ? '上传中...' : '+ 添加图片' }}
-            </label>
           </div>
 
           <!-- 翻页提示 -->
@@ -405,12 +460,35 @@ async function loadMore() {
         </div>
         <div class="form-group">
           <label>内容</label>
-          <textarea v-model="form.content" placeholder="写下你的故事..." rows="6" />
+          <textarea v-model="form.content" placeholder="写下你的故事..." rows="5" />
         </div>
+
+        <!-- 图片管理 -->
+        <div class="form-group">
+          <label>图片</label>
+          <div class="form-images" v-if="formImages.length || formNewPreviews.length">
+            <!-- 已有图片 -->
+            <div v-for="img in formImages" :key="img.id" class="form-img-wrap">
+              <img :src="img.url" class="form-img" />
+              <button class="form-img-del" @click="removeExistingImage(img)" type="button">×</button>
+            </div>
+            <!-- 待上传预览 -->
+            <div v-for="(url, idx) in formNewPreviews" :key="'new-'+idx" class="form-img-wrap new">
+              <img :src="url" class="form-img" />
+              <button class="form-img-del" @click="removeNewFile(idx)" type="button">×</button>
+            </div>
+          </div>
+          <label class="form-upload-btn">
+            <input type="file" accept="image/*" multiple hidden @change="onFormFileChange" />
+            + 添加图片
+          </label>
+        </div>
+
         <div class="form-actions">
+          <p v-if="formError" class="form-error">{{ formError }}</p>
           <button class="btn btn-ghost" @click="showForm = false">取消</button>
-          <button class="btn btn-primary" @click="submitForm" :disabled="submitting">
-            {{ submitting ? '保存中...' : '保存' }}
+          <button class="btn btn-primary" @click="submitForm" :disabled="submitting || formUploading">
+            {{ formUploading ? '上传图片中...' : submitting ? '保存中...' : '保存' }}
           </button>
         </div>
       </div>
@@ -682,8 +760,7 @@ async function loadMore() {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
 }
-.dp-images.grid-3 .dp-img-wrap:first-child,
-.dp-images.grid-3 .dp-upload:first-child {
+.dp-images.grid-3 .dp-img-wrap:first-child {
   grid-row: 1 / 3;
 }
 
@@ -698,8 +775,7 @@ async function loadMore() {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr 1fr;
 }
-.dp-images.grid-5 .dp-img-wrap:first-child,
-.dp-images.grid-5 .dp-upload:first-child {
+.dp-images.grid-5 .dp-img-wrap:first-child {
   grid-row: 1 / 3;
 }
 
@@ -723,43 +799,6 @@ async function loadMore() {
   display: block;
 }
 .dp-img:hover { transform: scale(1.04); }
-.dp-img-del {
-  position: absolute;
-  top: 5px; right: 5px;
-  width: 24px; height: 24px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.5);
-  color: #fff;
-  font-size: 14px;
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.2s;
-}
-.dp-img-del:hover { background: rgba(220,38,38,0.85); }
-
-/* 上传占位格 */
-.dp-upload {
-  border-radius: 10px;
-  border: 2px dashed #f0d0df;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 24px;
-  color: var(--pink);
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-  min-height: 0;
-}
-.dp-upload:hover { border-color: var(--pink-dark); background: var(--pink-light); }
-.dp-upload.uploading { opacity: 0.5; cursor: not-allowed; }
-
-/* 无图时上传 */
-.upload-row { margin-top: 8px; flex-shrink: 0; }
-.upload-btn {
-  display: inline-block; padding: 6px 16px;
-  border-radius: 50px; font-size: 13px;
-  background: var(--pink-light); color: var(--pink-dark);
-  cursor: pointer; transition: background 0.2s;
-}
-.upload-btn:hover { background: #f9d4e5; }
-.upload-btn.uploading { opacity: 0.6; cursor: not-allowed; }
 
 /* 翻页按钮 */
 .dp-nav {
@@ -798,7 +837,55 @@ async function loadMore() {
   background: var(--pink-light); color: var(--text); transition: all 0.2s;
 }
 .mood-btn.active { background: var(--pink-dark); color: #fff; }
-.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.form-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+.form-error { flex: 1 1 100%; color: #dc2626; font-size: 13px; margin-bottom: 4px; }
+
+/* 表单内图片管理 */
+.form-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.form-img-wrap {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.form-img-wrap.new { outline: 2px dashed var(--pink); }
+.form-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.form-img-del {
+  position: absolute;
+  top: 3px; right: 3px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s;
+}
+.form-img-del:hover { background: rgba(220,38,38,0.85); }
+.form-upload-btn {
+  display: inline-block;
+  padding: 7px 16px;
+  border-radius: 50px;
+  font-size: 13px;
+  background: var(--pink-light);
+  color: var(--pink-dark);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.form-upload-btn:hover { background: #f9d4e5; }
 
 /* 响应式：窄屏侧边栏改为抽屉 */
 .sidebar-mask { display: none; }
