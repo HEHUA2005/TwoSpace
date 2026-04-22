@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
+from sqlalchemy.orm import selectinload
 from auth import get_current_user
 from database import get_db
 from models import Diary, DiaryImage
@@ -26,6 +27,13 @@ def _user_name(author_id: int) -> str:
 
 def _image_url(filename: str) -> str:
     return f"/uploads/{filename}"
+
+
+async def _get_diary_with_images(db: AsyncSession, diary_id: int):
+    result = await db.execute(
+        select(Diary).where(Diary.id == diary_id).options(selectinload(Diary.images))
+    )
+    return result.scalar_one_or_none()
 
 
 def _diary_to_out(diary: Diary) -> DiaryOut:
@@ -59,11 +67,9 @@ async def list_diaries(
 
     sort_col = Diary.created_at.asc() if order == "asc" else Diary.created_at.desc()
     result = await db.execute(
-        select(Diary).order_by(sort_col).offset(offset).limit(limit)
+        select(Diary).order_by(sort_col).offset(offset).limit(limit).options(selectinload(Diary.images))
     )
     diaries = result.scalars().unique().all()
-    for d in diaries:
-        await db.refresh(d, ["images"])
 
     return DiaryListOut(
         items=[_diary_to_out(d) for d in diaries],
@@ -84,7 +90,7 @@ async def create_diary(
         diary.created_at = body.created_at
     db.add(diary)
     await db.commit()
-    await db.refresh(diary, ["images"])
+    diary = await _get_diary_with_images(db, diary.id)
     return _diary_to_out(diary)
 
 
@@ -94,10 +100,9 @@ async def get_diary(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
-    diary = await db.get(Diary, diary_id)
+    diary = await _get_diary_with_images(db, diary_id)
     if not diary:
         raise HTTPException(status_code=404, detail="日记不存在")
-    await db.refresh(diary, ["images"])
     return _diary_to_out(diary)
 
 
@@ -122,7 +127,7 @@ async def update_diary(
     if body.created_at is not None:
         diary.created_at = body.created_at
     await db.commit()
-    await db.refresh(diary, ["images"])
+    diary = await _get_diary_with_images(db, diary_id)
     return _diary_to_out(diary)
 
 
@@ -132,13 +137,11 @@ async def delete_diary(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    diary = await db.get(Diary, diary_id)
+    diary = await _get_diary_with_images(db, diary_id)
     if not diary:
         raise HTTPException(status_code=404, detail="日记不存在")
     if diary.author_id != current_user["id"]:
         raise HTTPException(status_code=403, detail="无权删除他人日记")
-    # 删除本地图片文件
-    await db.refresh(diary, ["images"])
     for img in diary.images:
         _delete_file(img.filename)
     await db.delete(diary)
