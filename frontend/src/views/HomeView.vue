@@ -9,7 +9,6 @@ const router = useRouter()
 const config = ref(null)
 const recentDiaries = ref([])
 const todayAnniversaries = ref([])
-const sentinel = ref(null)
 
 onMounted(async () => {
   // 各请求独立捕获，任一失败不影响其他
@@ -43,17 +42,6 @@ onMounted(async () => {
     { threshold: 0.12 }
   )
   document.querySelectorAll('.reveal').forEach(el => revealObs.observe(el))
-
-  // 滑到底部自动跳日记页
-  if (sentinel.value) {
-    let activated = false
-    setTimeout(() => { activated = true }, 800)
-    const sentinelObs = new IntersectionObserver(
-      ([e]) => { if (e.isIntersecting && activated) router.push('/diary') },
-      { threshold: 0.5 }
-    )
-    sentinelObs.observe(sentinel.value)
-  }
 })
 
 const moodEmoji = { happy: '😊', sad: '😢', love: '💕' }
@@ -142,11 +130,6 @@ function formatDate(dt) {
               </p>
             </div>
           </div>
-        </div>
-
-        <!-- 哨兵：滑到这里自动跳日记页 -->
-        <div ref="sentinel" class="sentinel">
-          <span class="sentinel-hint">继续下滑进入日记 →</span>
         </div>
       </section>
 
@@ -292,21 +275,4 @@ function formatDate(dt) {
 .feed-preview { font-size: 13px; color: var(--text-muted); line-height: 1.7; }
 
 /* ── 哨兵 ───────────────────────────────────────── */
-.sentinel {
-  display: flex;
-  justify-content: center;
-  padding: 28px 0 8px;
-}
-.sentinel-hint {
-  font-size: 13px;
-  color: var(--text-muted);
-  padding: 8px 20px;
-  border-radius: 50px;
-  background: var(--pink-light);
-  animation: hint-pulse 2s ease-in-out infinite;
-}
-@keyframes hint-pulse {
-  0%, 100% { opacity: 0.6; }
-  50%       { opacity: 1; }
-}
 </style>
